@@ -1,5 +1,8 @@
 import React, { useState, useEffect } from "react";
 import "./App.css";
+import jsPDF from 'jspdf';
+import 'jspdf-autotable';
+import * as XLSX from 'xlsx';
 
 const Country = () => {
     const [countries, setCountries] = useState([]);
@@ -7,7 +10,7 @@ const Country = () => {
     const [currentPage, setCurrentPage] = useState(0);
     const [totalPages, setTotalPages] = useState(0);
     const [newCountry, setNewCountry] = useState({ name: "" });
-    const [editingCountry, setEditingCountry] = useState(null); // Track country being edited
+    const [editingCountry, setEditingCountry] = useState(null);
     const pageSize = 5;
 
     useEffect(() => {
@@ -107,6 +110,36 @@ const Country = () => {
         }
     };
 
+    // Download the countries as a PDF
+    const generatePDF = () => {
+        const doc = new jsPDF();
+        doc.text('Country List', 20, 10);
+
+        const tableColumn = ['ID', 'Name'];
+        const tableRows = countries.map(country => [country.id, country.name]);
+
+        doc.autoTable({
+            head: [tableColumn],
+            body: tableRows,
+            startY: 20,
+        });
+
+        doc.save('countries.pdf');
+    };
+
+    const generateExcel = () => {
+        const worksheet = XLSX.utils.json_to_sheet(
+            countries.map(country => ({
+                ID: country.id,
+                Name: country.name,
+            }))
+        );
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, 'Countries');
+
+        XLSX.writeFile(workbook, 'countries.xlsx');
+    };
+
     return (
         <>
             <div className="container">
@@ -138,6 +171,7 @@ const Country = () => {
                         </button>
                     )}
                 </form>
+
             </div>
 
             {/* Country Table */}
@@ -182,6 +216,8 @@ const Country = () => {
                     <button onClick={handleNext} disabled={currentPage === totalPages - 1}>
                         Next
                     </button>
+                    <button onClick={generatePDF}>Generate PDF</button>
+                    <button onClick={generateExcel}>Export to Excel</button>
                 </div>
             </div>
         </>

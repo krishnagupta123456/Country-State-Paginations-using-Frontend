@@ -1,59 +1,109 @@
-import React, { useState, useEffect } from "react";
-import "./App.css";
+import axios from 'axios';
+import React, { useEffect, useState } from 'react';
+import './App.css';
+import jsPDF from 'jspdf';
+import 'jspdf-autotable';
+import * as XLSX from 'xlsx';
 
 const State = () => {
     const [states, setStates] = useState([]);
-    const [countries, setCountries] = useState([]);
-    const [loading, setLoading] = useState(false);
+    const [countries, setCountries] = useState([]); 
+    const [editId, setEditId] = useState(null);
+    const [name, setName] = useState('');
+    const [selectedCountry, setSelectedCountry] = useState('');
     const [currentPage, setCurrentPage] = useState(0);
     const [totalPages, setTotalPages] = useState(0);
-    const [newState, setNewState] = useState({
-        name: "",
-        countryId: "", // use countryId for dropdown selection
-    });
-    const [editingState, setEditingState] = useState(null);
+    const [selectedState, setSelectedState] = useState(null);
     const pageSize = 5;
 
     useEffect(() => {
-        fetchStates(currentPage);
-        fetchCountries();
-    }, [currentPage]);
+        fetchStates(currentPage); 
+        fetchCountries(); 
+    }, [currentPage]); 
 
-    // Fetch states with pagination
-    const fetchStates = async (page) => {
-        setLoading(true);
-        try {
-            const response = await fetch(
-                `http://localhost:8080/state?pageNo=${page}&pageSize=${pageSize}`
-            );
-            const result = await response.json();
-            setStates(result.content || []);
-            setTotalPages(result.totalPages || 0);
-        } catch (error) {
-            console.error("Error fetching states:", error);
-        } finally {
-            setLoading(false);
+    const fetchStates = (page) => {
+        axios.get(`http://localhost:8080/state?pageNo=${page}&pageSize=${pageSize}`)
+            .then(response => {
+                setStates(response.data.content || []);
+                setTotalPages(response.data.totalPages);
+            })
+            .catch(error => {
+                console.error('Error fetching states:', error.message);
+            });
+    };
+
+    const fetchCountries = () => {
+        axios.get('http://localhost:8080/country')
+            .then(response => {
+                console.log('Countries API response:', response.data); 
+                setCountries(response.data.content || []); 
+            })
+            .catch(error => {
+                console.error('Error fetching countries:', error.message);
+            });
+    };
+
+    const handleSubmit = (e) => {
+        e.preventDefault();
+        const state = {
+            name,
+            country: selectedCountry,
+        };
+
+        if (editId) {
+            axios.put(`http://localhost:8080/state/${editId}`, state)
+                .then(() => {
+                    fetchStates(currentPage);
+                    resetForm();
+                })
+                .catch(error => {
+                    console.error('Error updating the state!', error);
+                });
+
+        } else {
+            axios.post('http://localhost:8080/state', state)
+                .then(() => {
+                    fetchStates(currentPage);
+                    resetForm();
+                })
+                .catch(error => {
+                    console.error('Error creating the state!', error);
+                });
         }
     };
 
-    // Fetch all countries for dropdown
-    const fetchCountries = async () => {
-        try {
-            const response = await fetch("http://localhost:8080/country");
-            const result = await response.json();
-            // Ensure that the countries response is an array
-            if (Array.isArray(result)) {
-                setCountries(result);
-            } else {
-                console.error("Unexpected API response format:", result);
-                setCountries([]); // Default to an empty array if the response format is incorrect
-            }
-        } catch (error) {
-            console.error("Error fetching countries:", error);
-            setCountries([]); // Default to an empty array in case of an error
+    const resetForm = () => {
+        setEditId(null);
+        setName('');
+        setSelectedCountry('');
+        setSelectedState(null);
+    };
+
+
+    const handleEdit = (state) => {
+        setEditId(state.id);
+        setName(state.name);
+        setSelectedCountry(state.country);
+    };
+
+    const handleView = (state) => {
+        setSelectedState(state);
+    };
+
+    const handleDelete = (id) => {
+        const isConfirmed = window.confirm("Are you sure you want to delete this state?");
+        if (isConfirmed) {
+            axios.delete(`http://localhost:8080/state/${id}`)
+                .then(() => {
+                    fetchStates(currentPage);
+                })
+                .catch(error => {
+                    console.error('Error deleting the state!', error);
+                });
         }
     };
 
+    // Pagination controls
     const handlePrevious = () => {
         if (currentPage > 0) setCurrentPage(currentPage - 1);
     };
@@ -62,145 +112,97 @@ const State = () => {
         if (currentPage < totalPages - 1) setCurrentPage(currentPage + 1);
     };
 
-    const handleInputChange = (e) => {
-        const { name, value } = e.target;
-        setNewState({ ...newState, [name]: value });
+    const generateStatePDF = () => {
+        const doc = new jsPDF();
+        doc.text('State List', 20, 10);
+
+        const tableColumn = ['ID', 'State Name', 'Country'];
+        const tableRows = states.map((state, index) => [
+            index + 1,
+            state.name,
+            state.country,
+        ]);
+
+        doc.autoTable({
+            head: [tableColumn],
+            body: tableRows,
+            startY: 20,
+        });
+
+        doc.save('state_list.pdf');
     };
 
-    // Add a new state
-    const addState = async (e) => {
-        e.preventDefault();
-        try {
-            const response = await fetch("http://localhost:8080/state", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(newState),
-            });
-            if (response.ok) {
-                fetchStates(currentPage);
-                setNewState({ name: "", countryId: "" });
-            } else {
-                console.error("Failed to add state.");
-            }
-        } catch (error) {
-            console.error("Error adding state:", error);
-        }
+    const generateStateExcel = () => {
+        const worksheet = XLSX.utils.json_to_sheet(
+            states.map(state => ({
+                ID: state.id,
+                Name: state.name,
+                Country: state.country,
+            }))
+        );
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, 'States');
+        XLSX.writeFile(workbook, 'state_list.xlsx');
     };
 
-    // Start editing a state
-    const startEditing = (state) => {
-        setEditingState(state);
-        setNewState({ name: state.name, countryId: state.countryId });
-    };
-
-    // Update an existing state
-    const updateState = async (e) => {
-        e.preventDefault();
-        try {
-            const response = await fetch(`http://localhost:8080/state/${editingState.id}`, {
-                method: "PUT",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(newState),
-            });
-            if (response.ok) {
-                fetchStates(currentPage);
-                setEditingState(null);
-                setNewState({ name: "", countryId: "" });
-            } else {
-                console.error("Failed to update state.");
-            }
-        } catch (error) {
-            console.error("Error updating state:", error);
-        }
-    };
-
-    // Delete a state
-    const deleteState = async (id) => {
-        try {
-            const response = await fetch(`http://localhost:8080/state/${id}`, {
-                method: "DELETE",
-            });
-            if (response.ok) {
-                fetchStates(currentPage);
-            } else {
-                console.error("Failed to delete state.");
-            }
-        } catch (error) {
-            console.error("Error deleting state:", error);
-        }
-    };
 
     return (
         <>
             <div className="container">
-                <h3>State Management</h3>
-
-                {/* Add/Update State Form */}
-                <form onSubmit={editingState ? updateState : addState}>
-                    <div className="form-group">
-                        <label htmlFor="name">State Name:</label>
+                <h3>States Management</h3>
+                <form onSubmit={handleSubmit}>
+                    <div className='form-group'>
+                        <label htmlFor="name">Name: </label>
                         <input
                             type="text"
-                            name="name"
                             placeholder="Enter the State Name"
-                            value={newState.name}
-                            onChange={handleInputChange}
+                            value={name}
+                            onChange={(e) => setName(e.target.value)}
                             required
                         />
                     </div>
-                    <div className="form-group">
+                    <div className='form-group'>
                         <label htmlFor="country">Country:</label>
                         <select
-                            name="countryId"
-                            value={newState.countryId}
-                            onChange={handleInputChange}
+                            value={selectedCountry}
+                            onChange={(e) => setSelectedCountry(e.target.value)}
                             required
                         >
-                            <option value="">Select a Country</option>
-                            {countries.map(country => (
-                                <option key={country.id} value={country.name}>{country.name}</option>
-                            ))}
+                            <option value="">Select Country</option>
+                            {Array.isArray(countries) && countries.length > 0 ? (
+                                countries.map(country => (
+                                    <option key={country.id} value={country.name}>{country.name}</option>
+                                ))
+                            ) : (
+                                <option value="">No countries available</option>
+                            )}
                         </select>
                     </div>
-                    <button type="submit">{editingState ? "Update State" : "Add State"}</button>
-                    {editingState && (
-                        <button
-                            type="button"
-                            onClick={() => {
-                                setEditingState(null);
-                                setNewState({ name: "", country: "" });
-                            }}
-                        >
-                            Cancel
-                        </button>
-                    )}
+                    <button type="submit">{editId ? 'Update State' : 'Add State'}</button>
+                    <button type="button" onClick={resetForm}>Reset</button>
                 </form>
             </div>
 
-            {/* State Table */}
-            <div className="tableData">
-                <h3>State Lists</h3>
-                {loading ? (
-                    <p>Loading...</p>
-                ) : states.length > 0 ? (
+            <div className='tableData'>
+                <h3>States Lists</h3>
+                {states.length > 0 ? (
                     <table>
                         <thead>
                             <tr>
-                                <th>ID</th>
                                 <th>Name</th>
                                 <th>Country</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>
                         <tbody>
-                            {states.map((state) => (
+                            {states.map(state => (
                                 <tr key={state.id}>
-                                    <td>{state.id}</td>
                                     <td>{state.name}</td>
                                     <td>{state.country}</td>
                                     <td>
-                                        <button onClick={() => startEditing(state)}>Edit</button>
-                                        <button onClick={() => deleteState(state.id)}>Delete</button>
+                                        <button onClick={() => handleEdit(state)}>Edit</button>
+                                        <button onClick={() => handleView(state)}>View</button>
+                                        <button onClick={() => handleDelete(state.id)}>Delete</button>
                                     </td>
                                 </tr>
                             ))}
@@ -209,20 +211,35 @@ const State = () => {
                 ) : (
                     <p>No data available</p>
                 )}
-
-                {/* Pagination Controls */}
-                <div className="datapage">
-                    <button onClick={handlePrevious} disabled={currentPage === 0}>
-                        Previous
-                    </button>
-                    <span>
-                        Page {currentPage + 1} of {totalPages}
-                    </span>
-                    <button onClick={handleNext} disabled={currentPage === totalPages - 1}>
-                        Next
-                    </button>
-                </div>
             </div>
+
+            {/* Pagination Controls */}
+            <div className="datapage">
+                <button onClick={handlePrevious} disabled={currentPage === 0}>
+                    Previous
+                </button>
+                <span>
+                    Page {currentPage + 1} of {totalPages}
+                </span>
+                <button onClick={handleNext} disabled={currentPage === totalPages - 1}>
+                    Next
+                </button>
+                <button onClick={generateStatePDF}>Generate PDF</button>
+                <button onClick={generateStateExcel}>Generate Excel</button>
+            </div>
+
+            {selectedState && (
+                <div className="modal-overlay">
+                <div className="modal-content">
+                  <button onClick={resetForm} className="close-btn">Close</button>
+                  <h2 className='h1'>State Details</h2>
+                  <div className='text'>
+                  <p><strong>Name:</strong> {selectedState.name}</p>
+                  <p><strong>Country:</strong> {selectedState.country}</p>
+                  </div>
+                </div>
+              </div>
+            )}
         </>
     );
 };
